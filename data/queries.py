@@ -376,6 +376,66 @@ def get_all_fsrs_data(db: Any, config: dict) -> list[dict]:
     return [row for row in rows if row]
 
 
+def get_leech_hotspots(db: Any, config: dict) -> list[dict[str, Any]]:
+    """
+    Find decks with high leech card activity.
+    Consider decks that:
+      (a) had at least one review in the last 7 days.
+      (b) have at least 50 reviews in the last 30 days.
+
+    Returns:
+        A list of dicts: [
+            {
+                "deck_id": int,
+                "deck_name": str,
+                "total_reviews_7d": int,
+                "leech_count_7d": int,
+                "leeches_per_100_reviews": float,
+            }, ...
+        ] sorted by leeches_per_100_reviews descending.
+    """
+    cutoff_7d = _days_ago_cutoff_ms(7)
+    cutoff_30d = _days_ago_cutoff_ms(30)
+    deck_clause, deck_ids = _deck_id_clause(db, config.get("deck_filter", "all"))
+
+    # We join cards, notes, and decks to get the relevant metrics
+    sql = f"""
+        SELECT
+            c.did,
+            d.name,
+            COUNT(CASE WHEN r.id >= ? THEN 1 END) AS reviews_7d,
+            COUNT(*) AS reviews_30d,
+            COUNT(DISTINCT CASE WHEN r.id >= ? AND ' ' || COALESCE(n.tags, '') || ' ' LIKE '% leech %' THEN c.id END) AS leech_count_7d
+        FROM revlog r
+        JOIN cards c ON r.cid = c.id
+        JOIN notes n ON c.nid = n.id
+        LEFT JOIN decks d ON c.did = d.id
+        WHERE r.id >= ?
+          AND r.type IN (0, 1, 2, 3)
+          {deck_clause}
+        GROUP BY c.did
+        HAVING reviews_7d >= 1 AND reviews_30d >= 50
+    """
+    params = [cutoff_7d, cutoff_7d, cutoff_30d] + deck_ids
+    rows = db.all(sql, *params)
+
+    results = []
+    for row in rows:
+        did, name, reviews_7d, reviews_30d, leech_count_7d = row
+        deck_name = name if name else f"Deck {did}"
+        rate = round((leech_count_7d / reviews_7d) * 100, 2) if reviews_7d > 0 else 0.0
+        results.append({
+            "deck_id": did,
+            "deck_name": deck_name,
+            "total_reviews_7d": reviews_7d,
+            "leech_count_7d": leech_count_7d,
+            "leeches_per_100_reviews": rate,
+        })
+
+    results.sort(key=lambda x: x["leeches_per_100_reviews"], reverse=True)
+    return results
+
+
 def get_all_metrics(db: Any, config: dict) -> dict:
     """
     Convenience function: run all queries and return a single unified metrics dict.
@@ -387,6 +447,7 @@ def get_all_metrics(db: Any, config: dict) -> dict:
     previous = get_previous_period_stats(db, config)
     growth = get_growth_history(db, config)
     fsrs_raw = get_all_fsrs_data(db, config)
+    leech_hotspots = get_leech_hotspots(db, config)
 
     return {
         # Session overview
@@ -409,6 +470,8 @@ def get_all_metrics(db: Any, config: dict) -> dict:
         "prev_avg_time_sec": previous["avg_time_sec"],
         # History for graph
         "growth_history": growth,
+        # Leech hotspots
+        "leech_hotspots": leech_hotspots,
         # Raw FSRS data (parsed in fsrs_metrics.py)
         "_fsrs_raw": fsrs_raw,
     }

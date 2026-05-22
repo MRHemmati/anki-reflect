@@ -118,6 +118,39 @@
       </div>
     </div>
 
+    {% if metrics.leech_hotspots %}
+    <div class="leech-hotspots-container" style="margin-top: 1.75rem; padding-top: 1.5rem; border-top: 1px solid var(--border-subtle);">
+      <h3 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.4rem;">
+        <span style="font-size: 1.05rem;">🔥</span> Leech Hotspots by Deck
+      </h3>
+      <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1rem;">
+        {{ insights.leech_note | safe }}
+      </p>
+      <table class="comparison-table">
+        <thead>
+          <tr>
+            <th>Deck</th>
+            <th style="text-align: right;">Reviews (7d)</th>
+            <th style="text-align: right;">Leeches (7d)</th>
+            <th style="text-align: right;">Leeches / 100 Reviews</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for deck in metrics.leech_hotspots %}
+          <tr>
+            <td>{{ deck.deck_name }}</td>
+            <td class="metric-val" style="text-align: right;">{{ deck.total_reviews_7d | int | format_number }}</td>
+            <td class="metric-val" style="text-align: right;">{{ deck.leech_count_7d | int | format_number }}</td>
+            <td class="metric-val {{ 'bad' if deck.leeches_per_100_reviews >= 10 else 'warn' if deck.leeches_per_100_reviews > 0 else 'good' }}" style="text-align: right;">
+              {{ deck.leeches_per_100_reviews | round(2) }}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
   </section>
 
   <!-- ═══════════════════════════════════════════════════════════════════ -->

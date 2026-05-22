@@ -90,6 +90,7 @@ class InsightEngine:
         insights["retention_note"] = self._retention_note(metrics)
         insights["lapse_note"] = self._lapse_note(metrics)
         insights["mature_note"] = self._mature_note(metrics)
+        insights["leech_note"] = self._leech_note(metrics)
         insights["fsrs_note"] = self._fsrs_note(metrics)
         insights["etk_note"] = self._etk_note(metrics)
         insights["overall_emoji"] = self._overall_emoji(metrics)
@@ -210,6 +211,22 @@ class InsightEngine:
         return (
             f"Lapse Rate: <strong>&quot;Again&quot; count was {lr:.2f}%</strong> "
             f"({again:,} cards). {verdict}"
+        )
+
+    def _leech_note(self, m: dict) -> str:
+        hotspots = m.get("leech_hotspots", [])
+        if not hotspots or hotspots[0]["leech_count_7d"] == 0:
+            return "No major leech hotspots detected in your active decks. Great job maintaining memory stability!"
+
+        top = hotspots[0]
+        deck_name = top["deck_name"]
+        leech_count = top["leech_count_7d"]
+        rate = top["leeches_per_100_reviews"]
+
+        return (
+            f"Your highest leech density is in <strong>{deck_name}</strong>, yielding "
+            f"<strong>{leech_count:,} leech cards</strong> ({rate:.2f} per 100 reviews) this week. "
+            f"Focusing targeted review sessions or editing these cards could help resolve these persistent lapses."
         )
 
     def _mature_note(self, m: dict) -> str:
