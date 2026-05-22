@@ -1,0 +1,11 @@
+{
+  "name": "Anki Reflect",
+  "package": "anki_reflect",
+  "ankiweb_id": "",
+  "author": "Mohammad Hemmati",
+  "version": "0.1.0",
+  "homepage": "https://github.com/MRHemmati/anki-reflect",
+  "description": "Generates a detailed, narrative-driven reflection and statistics report for your study sessions — including FSRS metrics, retention trends, and a mature card growth graph.",
+  "conflicts": [],
+  "mod": 0
+}

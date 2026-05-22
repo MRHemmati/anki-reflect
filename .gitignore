@@ -1,0 +1,28 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+*.egg
+*.manifest
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# Anki runtime files
+meta.json
+config.json.backup
+user_files/
+*.log

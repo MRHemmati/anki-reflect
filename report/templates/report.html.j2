@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Anki Reflect — Session Report</title>
+  <style>
+    {% include 'styles.css' %}
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- HEADER                                                                   -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<header class="report-header">
+  <div class="header-inner">
+    <div class="header-logo">
+      <span class="logo-icon">{{ insights.overall_emoji }}</span>
+      <div class="logo-text">
+        <h1 class="report-title">Anki Reflect</h1>
+        <p class="report-subtitle">Session Report &mdash; {{ insights.report_date }}</p>
+      </div>
+    </div>
+    <div class="header-tagline">
+      <span class="session-title">{{ insights.session_title }}</span>
+    </div>
+  </div>
+</header>
+
+<main class="report-body">
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 1 — SESSION OVERVIEW                                        -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="section-overview">
+    <h2 class="section-heading">
+      <span class="section-icon">🌟</span> Session Overview
+    </h2>
+    <p class="section-subtitle">{{ insights.headline }}</p>
+
+    <!-- Stat cards row -->
+    <div class="stat-grid">
+
+      <div class="stat-card stat-primary">
+        <div class="stat-value">{{ metrics.total_reviews | int | format_number }}</div>
+        <div class="stat-label">Cards Reviewed</div>
+        {% if metrics.prev_total_reviews %}
+        <div class="stat-delta {{ 'delta-up' if metrics.total_reviews >= metrics.prev_total_reviews else 'delta-down' }}">
+          {{ '+' if metrics.total_reviews >= metrics.prev_total_reviews else '' }}{{ (metrics.total_reviews - metrics.prev_total_reviews) | int }}
+          vs previous
+        </div>
+        {% endif %}
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-value">{{ metrics.total_time_min | round(2) }}m</div>
+        <div class="stat-label">Time Spent</div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-value">{{ metrics.avg_time_sec | round(2) }}s</div>
+        <div class="stat-label">Avg per Card</div>
+      </div>
+
+      <div class="stat-card {{ 'stat-good' if metrics.mature_retention >= 80 else 'stat-warn' if metrics.mature_retention >= 70 else 'stat-bad' }}">
+        <div class="stat-value">{{ metrics.mature_retention | round(2) }}%</div>
+        <div class="stat-label">Mature Retention</div>
+      </div>
+
+      <div class="stat-card {{ 'stat-good' if metrics.lapse_rate <= 10 else 'stat-warn' if metrics.lapse_rate <= 20 else 'stat-bad' }}">
+        <div class="stat-value">{{ metrics.lapse_rate | round(2) }}%</div>
+        <div class="stat-label">Lapse Rate</div>
+      </div>
+
+      {% if metrics.has_fsrs %}
+      <div class="stat-card stat-fsrs">
+        <div class="stat-value">{{ metrics.median_stability_mo }}mo</div>
+        <div class="stat-label">Median Stability</div>
+      </div>
+      {% endif %}
+
+    </div><!-- /.stat-grid -->
+
+    <!-- Narrative paragraphs -->
+    <div class="narrative-block">
+      <p>{{ insights.volume_note | safe }}</p>
+      <p>{{ insights.speed_note | safe }}</p>
+    </div>
+
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 2 — RETENTION & LAPSES                                      -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="section-retention">
+    <h2 class="section-heading">
+      <span class="section-icon">🎯</span> Retention &amp; Lapses
+    </h2>
+
+    <div class="two-col">
+      <div class="narrative-block">
+        <p>{{ insights.retention_note | safe }}</p>
+        <p>{{ insights.lapse_note | safe }}</p>
+        <p>{{ insights.mature_note | safe }}</p>
+      </div>
+      <div class="retention-ring-wrapper">
+        {% set ret = metrics.mature_retention %}
+        <svg class="retention-ring" viewBox="0 0 120 120" width="120" height="120">
+          <circle cx="60" cy="60" r="50" class="ring-bg" />
+          <circle cx="60" cy="60" r="50" class="ring-fill"
+            stroke-dasharray="{{ (ret / 100 * 314.16) | round(2) }} 314.16"
+            stroke-dashoffset="78.54"
+            class="{{ 'ring-good' if ret >= 80 else 'ring-warn' if ret >= 70 else 'ring-bad' }}" />
+          <text x="60" y="58" class="ring-label-val">{{ ret | round(1) }}%</text>
+          <text x="60" y="72" class="ring-label-sub">Retention</text>
+        </svg>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 3 — METRIC COMPARISON TABLE                                 -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  {% if config.show_comparison_table %}
+  <section class="section" id="section-comparison">
+    <h2 class="section-heading">
+      <span class="section-icon">📊</span> Metric Breakdown
+    </h2>
+    <table class="comparison-table">
+      <thead>
+        <tr>
+          <th>Metric</th>
+          <th>This Period</th>
+          <th>Previous Period</th>
+          <th>Change</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Cards Reviewed</td>
+          <td class="metric-val">{{ metrics.total_reviews | int | format_number }}</td>
+          <td class="metric-val muted">{{ metrics.prev_total_reviews | int | format_number }}</td>
+          <td class="{{ 'positive' if metrics.total_reviews >= metrics.prev_total_reviews else 'negative' }}">
+            {{ '+' if metrics.total_reviews >= metrics.prev_total_reviews else '' }}{{ (metrics.total_reviews - metrics.prev_total_reviews) | int }}
+          </td>
+        </tr>
+        <tr>
+          <td>Time Spent (min)</td>
+          <td class="metric-val">{{ metrics.total_time_min | round(2) }}</td>
+          <td class="metric-val muted">{{ metrics.prev_total_time_min | round(2) }}</td>
+          <td class="{{ 'positive' if metrics.total_time_min <= metrics.prev_total_time_min else 'negative' }}">
+            {{ '+' if metrics.total_time_min > metrics.prev_total_time_min else '' }}{{ (metrics.total_time_min - metrics.prev_total_time_min) | round(2) }}
+          </td>
+        </tr>
+        <tr>
+          <td>Avg Speed (s/card)</td>
+          <td class="metric-val">{{ metrics.avg_time_sec | round(2) }}</td>
+          <td class="metric-val muted">{{ metrics.prev_avg_time_sec | round(2) }}</td>
+          <td class="{{ 'positive' if metrics.avg_time_sec <= metrics.prev_avg_time_sec else 'negative' }}">
+            {{ '+' if metrics.avg_time_sec > metrics.prev_avg_time_sec else '' }}{{ (metrics.avg_time_sec - metrics.prev_avg_time_sec) | round(2) }}s
+          </td>
+        </tr>
+        <tr>
+          <td>Mature Retention</td>
+          <td class="metric-val">{{ metrics.mature_retention }}%</td>
+          <td class="metric-val muted">&mdash;</td>
+          <td>&mdash;</td>
+        </tr>
+        <tr>
+          <td>Lapse Rate</td>
+          <td class="metric-val">{{ metrics.lapse_rate }}%</td>
+          <td class="metric-val muted">&mdash;</td>
+          <td>&mdash;</td>
+        </tr>
+        {% if metrics.has_fsrs %}
+        <tr>
+          <td>Median Stability</td>
+          <td class="metric-val">{{ metrics.median_stability_mo }} months</td>
+          <td class="metric-val muted">&mdash;</td>
+          <td>&mdash;</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 4 — FSRS DEEP DIVE                                          -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  {% if config.show_fsrs_metrics and metrics.has_fsrs %}
+  <section class="section" id="section-fsrs">
+    <h2 class="section-heading">
+      <span class="section-icon">🧠</span> FSRS Insights
+    </h2>
+    <div class="narrative-block">
+      <p>{{ insights.fsrs_note | safe }}</p>
+      <p>{{ insights.etk_note | safe }}</p>
+    </div>
+
+    {% if metrics.stability_distribution %}
+      {% if graphs.stability_dist %}
+      <div class="graph-wrapper">
+        {{ graphs.stability_dist | safe }}
+      </div>
+      {% endif %}
+    {% endif %}
+
+    <!-- FSRS stat pills -->
+    <div class="pill-row">
+      <div class="pill">
+        <span class="pill-key">Cards with FSRS data</span>
+        <span class="pill-val">{{ metrics.fsrs_card_count | format_number }}</span>
+      </div>
+      <div class="pill">
+        <span class="pill-key">Est. Total Knowledge</span>
+        <span class="pill-val">{{ metrics.estimated_knowledge | int | format_number }}</span>
+      </div>
+      <div class="pill">
+        <span class="pill-key">Mean Difficulty</span>
+        <span class="pill-val">{{ metrics.mean_difficulty }}/10</span>
+      </div>
+      <div class="pill">
+        <span class="pill-key">Struggling (&lt;70% ret.)</span>
+        <span class="pill-val {{ 'warn' if metrics.pct_struggling > 15 else '' }}">{{ metrics.pct_struggling }}%</span>
+      </div>
+      <div class="pill">
+        <span class="pill-key">Mastered (&ge;30 day stab.)</span>
+        <span class="pill-val {{ 'good' if metrics.pct_mastered > 50 else '' }}">{{ metrics.pct_mastered }}%</span>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 5 — GROWTH GRAPHS                                           -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  {% if config.show_growth_graph %}
+  <section class="section" id="section-graphs">
+    <h2 class="section-heading">
+      <span class="section-icon">📈</span> Mature Card Growth
+    </h2>
+
+    {% if graphs.growth %}
+    <div class="graph-wrapper">
+      {{ graphs.growth | safe }}
+    </div>
+    {% else %}
+    <p class="muted">Not enough data to render the growth graph yet.</p>
+    {% endif %}
+
+    {% if graphs.volume %}
+    <div class="graph-wrapper" style="margin-top: 1.5rem;">
+      {{ graphs.volume | safe }}
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 6 — REFLECTION & CLOSING                                    -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="section-reflection">
+    <h2 class="section-heading">
+      <span class="section-icon">💡</span> Reflection &amp; Insights
+    </h2>
+
+    {% if insights.llm_narrative %}
+    <div class="narrative-block narrative-llm">
+      <p>{{ insights.llm_narrative | safe }}</p>
+    </div>
+    {% endif %}
+
+    <div class="closing-card">
+      <p class="closing-text">{{ insights.closing_message }}</p>
+    </div>
+  </section>
+
+</main>
+
+<!-- Footer -->
+<footer class="report-footer">
+  Generated by <strong>Anki Reflect v{{ version }}</strong>
+  &bull; {{ insights.report_date }}
+</footer>
+
+</body>
+</html>

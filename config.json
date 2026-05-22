@@ -1,0 +1,23 @@
+{
+  "_comment": "Anki Reflect configuration. Edit values here to customize the add-on.",
+
+  "report_scope": "today",
+  "mature_threshold_days": 21,
+  "history_days": 90,
+
+  "graph_theme": "dark",
+  "graph_accent_color": "#7C6AF7",
+  "graph_secondary_color": "#F7A76C",
+
+  "llm_enabled": false,
+  "llm_provider": "openai",
+  "llm_api_key": "",
+  "llm_model": "gpt-4o-mini",
+  "llm_temperature": 0.7,
+
+  "deck_filter": "all",
+
+  "show_comparison_table": true,
+  "show_fsrs_metrics": true,
+  "show_growth_graph": true
+}
