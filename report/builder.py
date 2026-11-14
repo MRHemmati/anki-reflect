@@ -9,7 +9,7 @@ Pipeline:
     1. Read config from Anki's add-on config system
     2. Run all SQL queries  →  raw metrics dict
     3. Parse FSRS blobs    →  enriched metrics dict
-    4. Generate graphs     →  dict of base64 PNG strings
+    4. Generate graphs     →  dict of inline SVG strings
     5. Generate insights   →  dict of narrative strings
     6. Render Jinja2 HTML  →  final HTML string
 
@@ -19,6 +19,7 @@ does not break the entire report — the section is simply omitted.
 
 from __future__ import annotations
 
+from html import escape
 import os
 import traceback
 from typing import Optional
@@ -50,7 +51,7 @@ def _get_jinja_env() -> "Environment":
     if _jinja_env is None and _HAS_JINJA2:
         _jinja_env = Environment(
             loader=FileSystemLoader(_TEMPLATES_DIR),
-            autoescape=select_autoescape(["html"]),
+            autoescape=select_autoescape(["html", "htm", "xml", "j2"]),
         )
         # Custom filter: format large integers with thousands separators
         _jinja_env.filters["format_number"] = lambda v: f"{int(v):,}"
@@ -169,15 +170,16 @@ def _error_page(traceback_str: str) -> str:
 
 def _fallback_html(metrics: dict, insights: dict) -> str:
     """Minimal plain-text fallback when Jinja2 is unavailable."""
+    report_date = escape(str(insights.get("report_date", "")))
     lines = [
         "<html><head><meta charset='UTF-8'></head>",
         "<body style='font-family:monospace;background:#0f1021;color:#e8e8ff;padding:2rem'>",
-        f"<h2>📊 Anki Reflect — {insights.get('report_date','')}</h2>",
-        f"<p>Cards reviewed: <strong>{metrics.get('total_reviews',0)}</strong></p>",
-        f"<p>Time: <strong>{metrics.get('total_time_min',0):.2f} min</strong></p>",
-        f"<p>Avg speed: <strong>{metrics.get('avg_time_sec',0):.2f}s/card</strong></p>",
-        f"<p>Mature retention: <strong>{metrics.get('mature_retention',0):.2f}%</strong></p>",
-        f"<p>Lapse rate: <strong>{metrics.get('lapse_rate',0):.2f}%</strong></p>",
+        f"<h2>📊 Anki Reflect — {report_date}</h2>",
+        f"<p>Cards reviewed: <strong>{int(metrics.get('total_reviews',0))}</strong></p>",
+        f"<p>Time: <strong>{float(metrics.get('total_time_min',0)):.2f} min</strong></p>",
+        f"<p>Avg speed: <strong>{float(metrics.get('avg_time_sec',0)):.2f}s/card</strong></p>",
+        f"<p>Mature retention: <strong>{float(metrics.get('mature_retention',0)):.2f}%</strong></p>",
+        f"<p>Lapse rate: <strong>{float(metrics.get('lapse_rate',0)):.2f}%</strong></p>",
         "<p><em>Jinja2 not available — install it for the full report.</em></p>",
         "</body></html>",
     ]

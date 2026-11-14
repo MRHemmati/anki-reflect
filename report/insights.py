@@ -19,6 +19,7 @@ if the call fails.
 from __future__ import annotations
 
 import datetime
+from html import escape
 from typing import Optional
 
 
@@ -112,11 +113,12 @@ class InsightEngine:
     def _report_date(self, config: dict) -> str:
         scope = config.get("report_scope", "today")
         now = datetime.datetime.now()
+        month_day_year = f"{now.strftime('%B')} {now.day}, {now.year}"
         scope_label = {
-            "today": f"Today — {now.strftime('%A, %B %-d, %Y')}",
-            "week":  f"This Week — ending {now.strftime('%B %-d, %Y')}",
+            "today": f"Today — {now.strftime('%A')}, {month_day_year}",
+            "week":  f"This Week — ending {month_day_year}",
             "month": f"This Month — {now.strftime('%B %Y')}",
-        }.get(scope, now.strftime("%B %-d, %Y"))
+        }.get(scope, month_day_year)
         return scope_label
 
     def _headline(self, m: dict) -> str:
@@ -135,6 +137,8 @@ class InsightEngine:
     def _session_title(self, m: dict) -> str:
         n = m.get("total_reviews", 0)
         ret = m.get("mature_retention", 0.0)
+        if n == 0:
+            return "Ready When You Are"
         if n >= Thresholds.HIGH_VOLUME and ret >= Thresholds.GOOD_RET:
             return "Holding Steady at High Speeds"
         elif n >= Thresholds.HIGH_VOLUME:
@@ -150,23 +154,37 @@ class InsightEngine:
         n = m.get("total_reviews", 0)
         t = m.get("total_time_min", 0.0)
         s = m.get("avg_time_sec", 0.0)
+        streak = m.get("streak_days", 0)
         if n == 0:
+            if streak > 0:
+                return (
+                    f"No reviews recorded in this period yet — review today to extend your "
+                    f"<strong>{streak:,}-day streak</strong>."
+                )
             return "No reviews recorded in this period."
+        streak_str = (
+            f" You're on a <strong>{streak:,}-day study streak</strong>!"
+            if streak > 1
+            else ""
+        )
+        time_prep = "in just" if s <= Thresholds.NORMAL_PACE else "over"
         return (
             f"You tackled a {'heavy' if n >= Thresholds.HIGH_VOLUME else 'solid'} load of "
-            f"<strong>{n:,} cards</strong> and cleared them in just "
+            f"<strong>{n:,} cards</strong> and cleared them {time_prep} "
             f"<strong>{t:.2f} minutes</strong> "
-            f"({s:.2f} seconds per card)."
+            f"({s:.2f} seconds per card).{streak_str}"
         )
 
     def _speed_note(self, m: dict) -> str:
+        if m.get("total_reviews", 0) == 0:
+            return ""
         s = m.get("avg_time_sec", 0.0)
         prev_s = m.get("prev_avg_time_sec", 0.0)
         delta = s - prev_s if prev_s else 0
         direction = "faster" if delta < 0 else "slower"
         delta_str = (
             f" That's <strong>{abs(delta):.2f}s {direction}</strong> than your previous period."
-            if prev_s else ""
+            if prev_s and abs(delta) >= 0.01 else ""
         )
         if s <= Thresholds.FAST_PACE:
             note = f"Blazing pace at {s:.2f}s/card — you're in the zone."
@@ -200,12 +218,15 @@ class InsightEngine:
         lr = m.get("lapse_rate", 0.0)
         again = m.get("again_count", 0)
         total = m.get("total_reviews", 0)
+        ret = m.get("mature_retention", 0.0)
         if total == 0:
             return ""
         if lr <= Thresholds.LOW_LAPSE:
             verdict = "Very low — excellent memory recall."
         elif lr <= Thresholds.HIGH_LAPSE:
             verdict = "Moderate — within the normal range."
+        elif ret >= Thresholds.EXCELLENT_RET and m.get("mature_total", 0) > 0:
+            verdict = "High — mostly on new or learning cards while your mature retention stayed strong."
         else:
             verdict = "High — consider reviewing your difficult cards more frequently."
         return (
@@ -219,7 +240,7 @@ class InsightEngine:
             return "No major leech hotspots detected in your active decks. Great job maintaining memory stability!"
 
         top = hotspots[0]
-        deck_name = top["deck_name"]
+        deck_name = escape(str(top["deck_name"]))
         leech_count = top["leech_count_7d"]
         rate = top["leeches_per_100_reviews"]
 
@@ -248,9 +269,17 @@ class InsightEngine:
 
     def _fsrs_note(self, m: dict) -> str:
         if not m.get("has_fsrs", False):
+            raw_count = m.get("fsrs_raw_blob_count", 0)
+            if raw_count:
+                return (
+                    f"FSRS metrics were not parsed from the "
+                    f"<strong>{raw_count:,}</strong> active-deck card data blobs found. "
+                    "This usually means the stored card data does not match the "
+                    "expected FSRS state format yet."
+                )
             return (
-                "FSRS metrics not available — enable FSRS scheduling in Anki "
-                "preferences for deeper insights."
+                "FSRS metrics are not available for the active decks in this report yet. "
+                "Enable FSRS scheduling in Anki preferences for deeper insights."
             )
         med_mo = m.get("median_stability_mo", 0.0)
         diff = m.get("mean_difficulty", 0.0)

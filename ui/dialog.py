@@ -70,7 +70,7 @@ def show_reflection_dialog() -> None:
         )
         return
 
-    dialog = ReflectionDialog(html=html, parent=mw)
+    dialog = ReflectionDialog(html=html, parent=mw, config=config)
     dialog.show()
 
 
@@ -81,9 +81,11 @@ def show_reflection_dialog() -> None:
 class ReflectionDialog(QDialog):
     """Non-modal dialog displaying the generated HTML report in a WebView."""
 
-    def __init__(self, html: str, parent=None) -> None:
+    def __init__(self, html: str, parent=None, config: dict | None = None) -> None:
         super().__init__(parent)
         self._html = html
+        self._config = dict(config) if config else {}
+        self._scope_buttons: dict[str, QPushButton] = {}
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -154,6 +156,16 @@ class ReflectionDialog(QDialog):
         label.setStyleSheet("color: #7C6AF7; font-weight: 600; font-size: 13px;")
         toolbar.addWidget(label)
 
+        # Scope selector buttons
+        current_scope = self._config.get("report_scope", "today")
+        for scope_key, scope_label in (("today", "Today"), ("week", "Week"), ("month", "Month")):
+            btn_scope = QPushButton(scope_label)
+            btn_scope.setToolTip(f"Switch report scope to {scope_label.lower()}")
+            btn_scope.clicked.connect(lambda _checked=False, s=scope_key: self._set_scope(s))
+            self._scope_buttons[scope_key] = btn_scope
+            toolbar.addWidget(btn_scope)
+        self._update_scope_button_styles(current_scope)
+
         # Spacer
         spacer = QLabel("")
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -180,6 +192,22 @@ class ReflectionDialog(QDialog):
 
     # ── Actions ────────────────────────────────────────────────────────
 
+    def _update_scope_button_styles(self, active_scope: str) -> None:
+        """Highlight the currently active scope button in the toolbar."""
+        for scope_key, btn in self._scope_buttons.items():
+            if scope_key == active_scope:
+                btn.setStyleSheet(
+                    "background: rgba(124,106,247,0.42); border-color: #7C6AF7; font-weight: 600;"
+                )
+            else:
+                btn.setStyleSheet("")
+
+    def _set_scope(self, scope: str) -> None:
+        """Switch report scope and rebuild the report."""
+        self._config["report_scope"] = scope
+        self._update_scope_button_styles(scope)
+        self._refresh(preserve_scope=True)
+
     def _export_html(self) -> None:
         """Save the rendered HTML to a user-chosen file."""
         from aqt.qt import QFileDialog
@@ -202,14 +230,22 @@ class ReflectionDialog(QDialog):
                 from aqt.utils import showWarning
                 showWarning(f"Could not save file:\n{e}", title="Anki Reflect")
 
-    def _refresh(self) -> None:
+    def _refresh(self, preserve_scope: bool = False) -> None:
         """Rebuild the report with fresh data and reload the WebView."""
         if mw.col is None:
             return
+        selected_scope = self._config.get("report_scope")
         try:
-            config = mw.addonManager.getConfig(__name__.split(".")[0]) or {}
+            config = dict(mw.addonManager.getConfig(__name__.split(".")[0]) or {})
         except Exception:
-            config = {}
+            config = dict(self._config)
 
+        if preserve_scope and selected_scope:
+            config["report_scope"] = selected_scope
+        elif selected_scope and "report_scope" not in config:
+            config["report_scope"] = selected_scope
+
+        self._config = config
+        self._update_scope_button_styles(config.get("report_scope", "today"))
         self._html = build_report(mw.col.db, config)
         self._web.stdHtml(self._html)

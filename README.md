@@ -1,6 +1,6 @@
 # Anki Reflect
 
-> **A narrative-driven Anki add-on that generates rich, personalized study session reflections — with FSRS metrics, retention trends, and animated growth graphs.**
+> **A narrative-driven Anki add-on that generates rich, personalized study session reflections — with FSRS metrics, retention trends, and animated review activity graphs.**
 
 Anki Reflect hooks directly into your local database (`mw.col.db`) to analyze your daily or weekly study sessions, generating conversational insights and high-quality charts completely offline with zero binary dependencies.
 
@@ -10,14 +10,14 @@ Anki Reflect hooks directly into your local database (`mw.col.db`) to analyze yo
 
 | Feature | Details |
 |---|---|
-| 📊 **Session Overview** | Cards reviewed, time spent, avg speed, comparison to previous period. |
+| 📊 **Session Overview** | Cards reviewed, unique cards, review type breakdown, study streak, time spent, avg speed, and comparison to previous period. |
 | 🎯 **Retention Analysis** | Mature card retention %, correct/total breakdown, and a visual HTML/SVG ring chart. |
-| 🔁 **Lapse Tracking** | "Again" press rate with contextual narrative commentary. |
-| 🧠 **FSRS Metrics** | Median stability, mean difficulty, Estimated Total Knowledge (expected recall count), and struggling card % |
-| 📈 **Growth Graphs** | **Pure Python SVG graphs** (Mature Card Growth, Daily Review Volume, FSRS Stability Distribution). Fully responsive and crisp on Retina/High-DPI screens without requiring `matplotlib` or compiling C-extensions. |
+| 🔁 **Lapse & Leech Tracking** | "Again" press rate with contextual commentary + active-deck Leech Hotspots table. |
+| 🧠 **FSRS Metrics** | Median stability, mean difficulty, mean retrievability, Estimated Total Knowledge (expected recall count), and struggling/mastered % (supports FSRS v5 & v6). |
+| 📈 **Activity Graphs** | **Pure Python SVG graphs** (Mature Review Activity, Daily Review Volume, FSRS Stability Distribution). Fully responsive and crisp on Retina/High-DPI screens without requiring `matplotlib` or compiling C-extensions. |
 | 💡 **Narrative Insights** | Offline, deterministic Python template engine generating conversational, personalized reflections. |
 | 🤖 **Optional LLM** | Plug in an OpenAI or Anthropic key in the config to receive AI-generated narrative reflections. |
-| ⬇️ **Export** | Save your study reflections as a standalone HTML file. |
+| ⬇️ **Interactive Toolbar & Export** | Switch between **Today / Week / Month** directly in the report toolbar, refresh live, or export as a standalone HTML file. |
 
 ---
 
@@ -46,7 +46,7 @@ The report will display in a beautiful, dark-mode glassmorphic interface:
 - **Retention & Lapses** — accuracy and lapse rate commentary
 - **Metric Breakdown** — detailed comparison table of current vs previous sessions
 - **FSRS Insights** — deep dive into stability distributions and knowledge accumulation
-- **Mature Card Growth & Volume** — clean, responsive timeline charts
+- **Mature Review Activity & Volume** — clean, responsive timeline charts
 - **Reflection & Insights** — final motivational commentary
 
 ---

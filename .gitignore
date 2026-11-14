@@ -17,9 +17,11 @@ dist/
 *.egg
 *.manifest
 
-# Editor / IDE
+# Editor / IDE / OS
 .vscode/
 .idea/
+.DS_Store
+*/.DS_Store
 
 # Anki runtime files
 meta.json

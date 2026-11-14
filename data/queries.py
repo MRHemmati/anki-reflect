@@ -34,6 +34,18 @@ from typing import Any
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+_ANKI_DECK_SEPARATOR = "\x1f"
+_ACTIVE_DECK_MIN_REVIEWS_7D = 1
+_ACTIVE_DECK_MIN_REVIEWS_30D = 50
+
+
+def _display_deck_name(name: Any) -> str:
+    """Return a user-facing deck name from Anki's stored deck name."""
+    if name is None:
+        return ""
+    return str(name).replace(_ANKI_DECK_SEPARATOR, "::")
+
+
 def _today_cutoff_ms() -> int:
     """Return epoch-ms for midnight of the current local day."""
     now = datetime.datetime.now()
@@ -73,18 +85,52 @@ def _deck_id_clause(db: Any, deck_filter: str) -> tuple[str, list[int]]:
     if deck_filter == "all":
         return "", []
 
-    # Fetch all decks and filter by name prefix
+    # Fetch all decks and filter by user-facing name prefix.
     rows = db.all("SELECT id, name FROM decks")
     matching_ids = [
         row[0] for row in rows
-        if row[1] == deck_filter or row[1].startswith(deck_filter + "::")
+        if (
+            _display_deck_name(row[1]) == deck_filter
+            or _display_deck_name(row[1]).startswith(deck_filter + "::")
+        )
     ]
     if not matching_ids:
-        return "", []
+        return "AND 0", []
 
     placeholders = ",".join("?" * len(matching_ids))
     clause = f"AND c.did IN ({placeholders})"
     return clause, matching_ids
+
+
+def _active_deck_ids(db: Any, config: dict) -> list[int]:
+    """
+    Return deck IDs considered active for report-wide deck-scoped analysis.
+
+    Active means at least one review in the last 7 days and at least 50 reviews
+    in the last 30 days. The optional deck_filter is still respected.
+    """
+    cutoff_7d = _days_ago_cutoff_ms(7)
+    cutoff_30d = _days_ago_cutoff_ms(30)
+    deck_clause, deck_ids = _deck_id_clause(db, config.get("deck_filter", "all"))
+
+    sql = f"""
+        SELECT c.did
+        FROM revlog r
+        JOIN cards c ON r.cid = c.id
+        WHERE r.id >= ?
+          AND r.type IN (0, 1, 2, 3)
+          {deck_clause}
+        GROUP BY c.did
+        HAVING SUM(CASE WHEN r.id >= ? THEN 1 ELSE 0 END) >= ?
+           AND COUNT(*) >= ?
+    """
+    params = (
+        [cutoff_30d]
+        + deck_ids
+        + [cutoff_7d, _ACTIVE_DECK_MIN_REVIEWS_7D, _ACTIVE_DECK_MIN_REVIEWS_30D]
+    )
+    rows = db.all(sql, *params)
+    return [row[0] for row in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -104,10 +150,18 @@ def get_session_overview(db: Any, config: dict) -> dict:
     scope_cutoff = _scope_cutoff_ms(config.get("report_scope", "today"))
     deck_clause, deck_ids = _deck_id_clause(db, config.get("deck_filter", "all"))
 
-    # Build query — join revlog → cards only when a deck filter is active
-    if deck_ids:
+    # Build query — join revlog → cards when a deck filter is active or empty.
+    if deck_clause:
         sql = f"""
-            SELECT COUNT(*), SUM(r.time), AVG(r.time)
+            SELECT
+                COUNT(*),
+                SUM(r.time),
+                AVG(r.time),
+                COUNT(DISTINCT r.cid),
+                SUM(CASE WHEN r.type = 0 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN r.type = 1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN r.type = 2 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN r.type = 3 THEN 1 ELSE 0 END)
             FROM revlog r
             JOIN cards c ON r.cid = c.id
             WHERE r.id >= ?
@@ -117,7 +171,15 @@ def get_session_overview(db: Any, config: dict) -> dict:
         params = [scope_cutoff] + deck_ids
     else:
         sql = """
-            SELECT COUNT(*), SUM(time), AVG(time)
+            SELECT
+                COUNT(*),
+                SUM(time),
+                AVG(time),
+                COUNT(DISTINCT cid),
+                SUM(CASE WHEN type = 0 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN type = 1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN type = 2 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN type = 3 THEN 1 ELSE 0 END)
             FROM revlog
             WHERE id >= ?
               AND type IN (0, 1, 2, 3)
@@ -128,12 +190,22 @@ def get_session_overview(db: Any, config: dict) -> dict:
     count = row[0] if (row and row[0]) else 0
     total_ms = row[1] if (row and row[1]) else 0
     avg_ms = row[2] if (row and row[2]) else 0
+    unique_cards = row[3] if (row and row[3]) else 0
+    learn_reviews = row[4] if (row and row[4]) else 0
+    review_reviews = row[5] if (row and row[5]) else 0
+    relearn_reviews = row[6] if (row and row[6]) else 0
+    cram_reviews = row[7] if (row and row[7]) else 0
 
     return {
         "total_reviews": count,
         "total_time_ms": total_ms,
         "total_time_min": round(total_ms / 60_000, 2),
         "avg_time_sec": round(avg_ms / 1000, 2),
+        "unique_cards": unique_cards,
+        "learn_reviews": learn_reviews,
+        "review_reviews": review_reviews,
+        "relearn_reviews": relearn_reviews,
+        "cram_reviews": cram_reviews,
     }
 
 
@@ -157,7 +229,7 @@ def get_mature_stats(db: Any, config: dict) -> dict:
     deck_clause, deck_ids = _deck_id_clause(db, config.get("deck_filter", "all"))
 
     # --- Total non-suspended cards ---
-    if deck_ids:
+    if deck_clause:
         total_sql = f"""
             SELECT COUNT(*) FROM cards
             WHERE queue >= 0 {deck_clause.replace('c.did', 'did')}
@@ -169,7 +241,7 @@ def get_mature_stats(db: Any, config: dict) -> dict:
         ) or 0
 
     # --- Mature card count ---
-    if deck_ids:
+    if deck_clause:
         mature_count_sql = f"""
             SELECT COUNT(*) FROM cards
             WHERE queue >= 0 AND ivl >= ?
@@ -182,7 +254,7 @@ def get_mature_stats(db: Any, config: dict) -> dict:
     mature_count = db.scalar(mature_count_sql, *mature_count_params) or 0
 
     # --- Retention: reviews on mature cards in scope window ---
-    if deck_ids:
+    if deck_clause:
         ret_sql = f"""
             SELECT
                 SUM(CASE WHEN r.ease > 1 THEN 1 ELSE 0 END),
@@ -237,7 +309,7 @@ def get_lapse_stats(db: Any, config: dict) -> dict:
     scope_cutoff = _scope_cutoff_ms(config.get("report_scope", "today"))
     deck_clause, deck_ids = _deck_id_clause(db, config.get("deck_filter", "all"))
 
-    if deck_ids:
+    if deck_clause:
         sql = f"""
             SELECT
                 SUM(CASE WHEN r.ease = 1 THEN 1 ELSE 0 END),
@@ -274,82 +346,161 @@ def get_previous_period_stats(db: Any, config: dict) -> dict:
     """
     Fetch equivalent metrics for the previous period (for the comparison table).
 
-    Returns the same structure as ``get_session_overview`` but for the period
-    immediately preceding the current scope window.
+    Returns overview, mature retention, and lapse metrics for the period
+    immediately preceding the current scope window:
+      - "today": yesterday (1 day prior to today's midnight)
+      - "week":  days 7–14 ago
+      - "month": days 30–60 ago
     """
     scope = config.get("report_scope", "today")
-    scope_days = {"today": 1, "week": 7, "month": 30}.get(scope, 1)
+    threshold = config.get("mature_threshold_days", 21)
+    prev_days = {"today": 1, "week": 14, "month": 60}.get(scope, 1)
 
     current_start = _scope_cutoff_ms(scope)
     prev_end = current_start
-    prev_start = _days_ago_cutoff_ms(scope_days * 2)  # one period back
+    prev_start = _days_ago_cutoff_ms(prev_days)
+    deck_clause, deck_ids = _deck_id_clause(db, config.get("deck_filter", "all"))
 
-    # Simple query (no deck filter for previous period to keep it fast)
-    sql = """
-        SELECT COUNT(*), SUM(time), AVG(time)
-        FROM revlog
-        WHERE id >= ? AND id < ?
-          AND type IN (0, 1, 2, 3)
+    join_type = "JOIN" if deck_clause else "LEFT JOIN"
+    sql = f"""
+        SELECT
+            COUNT(*),
+            SUM(r.time),
+            AVG(r.time),
+            SUM(CASE WHEN r.ease = 1 THEN 1 ELSE 0 END),
+            SUM(CASE WHEN r.type IN (1, 2) AND c.ivl >= ? AND c.queue >= 0 AND r.ease > 1 THEN 1 ELSE 0 END),
+            SUM(CASE WHEN r.type IN (1, 2) AND c.ivl >= ? AND c.queue >= 0 THEN 1 ELSE 0 END)
+        FROM revlog r
+        {join_type} cards c ON r.cid = c.id
+        WHERE r.id >= ? AND r.id < ?
+          AND r.type IN (0, 1, 2, 3)
+          {deck_clause}
     """
-    row = db.first(sql, prev_start, prev_end)
+    params = [threshold, threshold, prev_start, prev_end] + deck_ids
+
+    row = db.first(sql, *params)
     count = row[0] if (row and row[0]) else 0
     total_ms = row[1] if (row and row[1]) else 0
     avg_ms = row[2] if (row and row[2]) else 0
+    again = row[3] if (row and row[3]) else 0
+    mature_correct = row[4] if (row and row[4]) else 0
+    mature_total = row[5] if (row and row[5]) else 0
 
     return {
         "total_reviews": count,
         "total_time_min": round(total_ms / 60_000, 2),
         "avg_time_sec": round(avg_ms / 1000, 2),
+        "again_count": again,
+        "lapse_rate": round(again / count * 100, 2) if count > 0 else 0.0,
+        "mature_correct": mature_correct,
+        "mature_total": mature_total,
+        "mature_retention": round(mature_correct / mature_total * 100, 2) if mature_total > 0 else 0.0,
     }
 
 
 def get_growth_history(db: Any, config: dict) -> list[dict]:
     """
-    Fetch daily mature card counts over the configured history window.
+    Fetch daily mature review counts over the configured history window.
 
     Because revlog doesn't track "maturity at time of review" directly, we
-    approximate: for each day, count distinct card IDs in revlog that had a
-    positive review (ease > 1) up to that day and whose *current* interval
-    is >= mature_threshold. This is a fast approximation that matches what
-    Anki's native stats show.
+    approximate: for each local calendar day, count distinct card IDs in revlog
+    that had a review (type 1 or 2) on that day and whose *current* interval
+    is >= mature_threshold.
 
-    Returns a list of dicts: [{"date": datetime.date, "mature_count": int}, ...]
+    Returns a list of dicts: [{"date": datetime.date, "count": int}, ...]
     sorted ascending by date.
     """
     history_days = config.get("history_days", 90)
     threshold = config.get("mature_threshold_days", 21)
-    cutoff = _days_ago_cutoff_ms(history_days)
+    today_cutoff = _today_cutoff_ms()
+    anchor_ms = today_cutoff - history_days * 86_400_000
+    deck_clause, deck_ids = _deck_id_clause(db, config.get("deck_filter", "all"))
 
-    sql = """
+    sql = f"""
         SELECT
-            CAST(r.id / 86400000 AS INTEGER) AS day_epoch,
-            COUNT(DISTINCT r.cid)            AS reviews_on_day
+            CAST((r.id - ?) / 86400000 AS INTEGER) AS day_offset,
+            COUNT(DISTINCT r.cid)                  AS reviews_on_day
         FROM revlog r
         JOIN cards c ON r.cid = c.id
         WHERE r.id >= ?
           AND r.type IN (1, 2)
           AND c.ivl >= ?
           AND c.queue >= 0
-        GROUP BY day_epoch
-        ORDER BY day_epoch ASC
+          {deck_clause}
+        GROUP BY day_offset
+        ORDER BY day_offset ASC
     """
-    rows = db.all(sql, cutoff, threshold)
+    rows = db.all(sql, *([anchor_ms, anchor_ms, threshold] + deck_ids))
 
-    # Convert Unix day epoch → datetime.date and build cumulative counts
+    base_date = datetime.date.today() - datetime.timedelta(days=history_days)
     result = []
-    cumulative = 0
     for row in rows:
-        day_epoch, count = row
-        date = datetime.date.fromtimestamp(day_epoch * 86400)
-        cumulative += count
+        day_offset, count = row
+        date = base_date + datetime.timedelta(days=int(day_offset))
         result.append({"date": date, "count": count})
 
     return result
 
 
-def get_all_fsrs_data(db: Any, config: dict) -> list[dict]:
+def get_study_streak(db: Any, config: dict) -> int:
     """
-    Return the raw FSRS state blobs for all non-suspended cards.
+    Calculate the user's current consecutive-day study streak in local days.
+
+    If the user has reviewed today, counts today plus consecutive prior days.
+    If the user has not reviewed yet today, counts consecutive days ending
+    yesterday so an active streak is preserved until end of day.
+    """
+    end_of_today = _today_cutoff_ms() + 86_400_000 - 1
+    deck_clause, deck_ids = _deck_id_clause(db, config.get("deck_filter", "all"))
+
+    if deck_clause:
+        sql = f"""
+            SELECT DISTINCT CAST((? - r.id) / 86400000 AS INTEGER) AS days_ago
+            FROM revlog r
+            JOIN cards c ON r.cid = c.id
+            WHERE r.id <= ?
+              AND r.type IN (0, 1, 2, 3)
+              {deck_clause}
+            ORDER BY days_ago ASC
+        """
+        params = [end_of_today, end_of_today] + deck_ids
+    else:
+        sql = """
+            SELECT DISTINCT CAST((? - id) / 86400000 AS INTEGER) AS days_ago
+            FROM revlog
+            WHERE id <= ?
+              AND type IN (0, 1, 2, 3)
+            ORDER BY days_ago ASC
+        """
+        params = [end_of_today, end_of_today]
+
+    days_ago_list = [int(d) for d in db.list(sql, *params) if d is not None and int(d) >= 0]
+    if not days_ago_list:
+        return 0
+
+    days_set = set(days_ago_list)
+    if 0 in days_set:
+        start_day = 0
+    elif 1 in days_set:
+        start_day = 1
+    else:
+        return 0
+
+    streak = 0
+    curr = start_day
+    while curr in days_set:
+        streak += 1
+        curr += 1
+    return streak
+
+
+def get_all_fsrs_data(db: Any, config: dict) -> list[str]:
+    """
+    Return raw FSRS state blobs for non-suspended cards in active decks.
+
+    "Active" uses the same rule as leech hotspots: at least one review in the
+    last 7 days and at least 50 reviews in the last 30 days. The optional
+    deck_filter is still respected.
 
     Each row in ``cards.data`` is a JSON string like::
 
@@ -359,19 +510,19 @@ def get_all_fsrs_data(db: Any, config: dict) -> list[dict]:
 
     Returns a list of raw JSON strings (may include empty strings / '{}').
     """
-    deck_clause, deck_ids = _deck_id_clause(db, config.get("deck_filter", "all"))
+    active_deck_ids = _active_deck_ids(db, config)
+    if not active_deck_ids:
+        return []
 
-    if deck_ids:
-        sql = f"""
-            SELECT data FROM cards
-            WHERE queue >= 0 AND data IS NOT NULL AND data != ''
-            {deck_clause.replace('c.did', 'did')}
-        """
-        rows = db.list(sql, *deck_ids)
-    else:
-        rows = db.list(
-            "SELECT data FROM cards WHERE queue >= 0 AND data IS NOT NULL AND data != ''"
-        )
+    placeholders = ",".join("?" * len(active_deck_ids))
+    sql = f"""
+        SELECT data FROM cards
+        WHERE queue >= 0
+          AND data IS NOT NULL
+          AND data != ''
+          AND did IN ({placeholders})
+    """
+    rows = db.list(sql, *active_deck_ids)
 
     return [row for row in rows if row]
 
@@ -379,9 +530,9 @@ def get_all_fsrs_data(db: Any, config: dict) -> list[dict]:
 def get_leech_hotspots(db: Any, config: dict) -> list[dict[str, Any]]:
     """
     Find decks with high leech card activity.
-    Consider decks that:
-      (a) had at least one review in the last 7 days.
-      (b) have at least 50 reviews in the last 30 days.
+    Consider decks that match the shared active-deck rule:
+      (a) at least one review in the last 7 days.
+      (b) at least 50 reviews in the last 30 days.
 
     Returns:
         A list of dicts: [
@@ -414,15 +565,19 @@ def get_leech_hotspots(db: Any, config: dict) -> list[dict[str, Any]]:
           AND r.type IN (0, 1, 2, 3)
           {deck_clause}
         GROUP BY c.did
-        HAVING reviews_7d >= 1 AND reviews_30d >= 50
+        HAVING reviews_7d >= ? AND reviews_30d >= ?
     """
-    params = [cutoff_7d, cutoff_7d, cutoff_30d] + deck_ids
+    params = (
+        [cutoff_7d, cutoff_7d, cutoff_30d]
+        + deck_ids
+        + [_ACTIVE_DECK_MIN_REVIEWS_7D, _ACTIVE_DECK_MIN_REVIEWS_30D]
+    )
     rows = db.all(sql, *params)
 
     results = []
     for row in rows:
         did, name, reviews_7d, reviews_30d, leech_count_7d = row
-        deck_name = name if name else f"Deck {did}"
+        deck_name = _display_deck_name(name) if name else f"Deck {did}"
         rate = round((leech_count_7d / reviews_7d) * 100, 2) if reviews_7d > 0 else 0.0
         results.append({
             "deck_id": did,
@@ -446,6 +601,7 @@ def get_all_metrics(db: Any, config: dict) -> dict:
     lapse = get_lapse_stats(db, config)
     previous = get_previous_period_stats(db, config)
     growth = get_growth_history(db, config)
+    streak = get_study_streak(db, config)
     fsrs_raw = get_all_fsrs_data(db, config)
     leech_hotspots = get_leech_hotspots(db, config)
 
@@ -454,6 +610,12 @@ def get_all_metrics(db: Any, config: dict) -> dict:
         "total_reviews": overview["total_reviews"],
         "total_time_min": overview["total_time_min"],
         "avg_time_sec": overview["avg_time_sec"],
+        "unique_cards": overview["unique_cards"],
+        "learn_reviews": overview["learn_reviews"],
+        "review_reviews": overview["review_reviews"],
+        "relearn_reviews": overview["relearn_reviews"],
+        "cram_reviews": overview["cram_reviews"],
+        "streak_days": streak,
         # Mature stats
         "mature_count": mature["mature_count"],
         "total_cards": mature["total_cards"],
@@ -468,6 +630,9 @@ def get_all_metrics(db: Any, config: dict) -> dict:
         "prev_total_reviews": previous["total_reviews"],
         "prev_total_time_min": previous["total_time_min"],
         "prev_avg_time_sec": previous["avg_time_sec"],
+        "prev_lapse_rate": previous["lapse_rate"],
+        "prev_mature_retention": previous["mature_retention"],
+        "prev_mature_total": previous["mature_total"],
         # History for graph
         "growth_history": growth,
         # Leech hotspots

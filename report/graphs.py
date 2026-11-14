@@ -10,16 +10,27 @@ cross-platform, and light/dark theme-compatible without compiling binary extensi
 from __future__ import annotations
 
 import datetime
+from html import escape
+import re
 from typing import Optional
+
+_SAFE_COLOR_RE = re.compile(r"^(#[0-9a-fA-F]{3,8}|[a-zA-Z]{3,20})$")
+
+
+def _safe_color(value: object, default: str) -> str:
+    """Validate a CSS color string for safe interpolation into SVG attributes."""
+    if isinstance(value, str) and _SAFE_COLOR_RE.match(value.strip()):
+        return value.strip()
+    return default
 
 
 # ---------------------------------------------------------------------------
-# Graph 1 — Mature Card Growth Plot
+# Graph 1 — Mature Review Activity Plot
 # ---------------------------------------------------------------------------
 
 def render_growth_graph(growth_history: list[dict], config: dict) -> Optional[str]:
     """
-    Render the "Mature Card Growth Plot" as an inline SVG string.
+    Render the mature review activity plot as an inline SVG string.
 
     Args:
         growth_history: list of {"date": datetime.date, "count": int}
@@ -53,16 +64,16 @@ def render_growth_graph(growth_history: list[dict], config: dict) -> Optional[st
 
     # Theme colors
     theme = config.get("graph_theme", "dark")
-    accent = config.get("graph_accent_color", "#7C6AF7")
-    secondary = config.get("graph_secondary_color", "#F7A76C")
-    
+    accent = _safe_color(config.get("graph_accent_color"), "#7C6AF7")
+    secondary = _safe_color(config.get("graph_secondary_color"), "#F7A76C")
+
     bg_color = "transparent"
     text_color = "#a0a5cc" if theme == "dark" else "#4a4b63"
     grid_color = "#2a2b4e" if theme == "dark" else "#e8e8e8"
 
     # Dimensions
     width, height = 900.0, 380.0
-    pad_left, pad_right, pad_top, pad_bottom = 70.0, 30.0, 40.0, 60.0
+    pad_left, pad_right, pad_top, pad_bottom = 70.0, 30.0, 44.0, 60.0
     plot_w = width - pad_left - pad_right
     plot_h = height - pad_top - pad_bottom
 
@@ -70,16 +81,14 @@ def render_growth_graph(growth_history: list[dict], config: dict) -> Optional[st
     min_date = dates[0]
     max_date = dates[-1]
     time_diff = (max_date - min_date).days
-    if time_diff == 0:
-        time_diff = 1
 
     min_val = min(cumulative)
     max_val = max(cumulative)
     val_range = max_val - min_val
     if val_range == 0:
-        val_range = 10.0
-        min_val = max(0.0, min_val - 5.0)
-        max_val = max_val + 5.0
+        val_range = max(10.0, max_val * 0.2 if max_val > 0 else 10.0)
+        min_val = max(0.0, min_val - val_range / 2.0)
+        max_val = min_val + val_range
     else:
         # Give 10% breathing room top and bottom
         padding = val_range * 0.1
@@ -89,6 +98,8 @@ def render_growth_graph(growth_history: list[dict], config: dict) -> Optional[st
 
     # Mapping helpers
     def get_x(d: datetime.date) -> float:
+        if time_diff <= 0:
+            return pad_left + plot_w / 2.0
         days = (d - min_date).days
         return pad_left + (days / time_diff) * plot_w
 
@@ -106,7 +117,7 @@ def render_growth_graph(growth_history: list[dict], config: dict) -> Optional[st
         )
         gridlines.append(
             f'<text x="{pad_left - 10}" y="{y_pos + 4}" fill="{text_color}" '
-            f'font-family="sans-serif" font-size="11" text-anchor="end">{int(y_val):,}</text>'
+            f'font-family="sans-serif" font-size="11" text-anchor="end">{int(round(y_val)):,}</text>'
         )
 
     # Build date ticks
@@ -127,29 +138,52 @@ def render_growth_graph(growth_history: list[dict], config: dict) -> Optional[st
         )
 
     # Build graph paths
-    points = [f"{get_x(d)},{get_y(v)}" for d, v in zip(dates, cumulative)]
-    path_data = "M " + " L ".join(points)
-    
-    first_x = get_x(dates[0])
-    last_x = get_x(dates[-1])
-    area_data = f"{path_data} L {last_x},{pad_top + plot_h} L {first_x},{pad_top + plot_h} Z"
+    if len(dates) == 1:
+        y0 = get_y(cumulative[0])
+        path_data = f"M {pad_left},{y0} L {width - pad_right},{y0}"
+        area_data = (
+            f"M {pad_left},{y0} L {width - pad_right},{y0} "
+            f"L {width - pad_right},{pad_top + plot_h} L {pad_left},{pad_top + plot_h} Z"
+        )
+        rolling_path_data = path_data
+    else:
+        points = [f"{get_x(d)},{get_y(v)}" for d, v in zip(dates, cumulative)]
+        path_data = "M " + " L ".join(points)
 
-    rolling_points = [f"{get_x(d)},{get_y(rv)}" for d, rv in zip(dates, rolling)]
-    rolling_path_data = "M " + " L ".join(rolling_points)
+        first_x = get_x(dates[0])
+        last_x = get_x(dates[-1])
+        area_data = f"{path_data} L {last_x},{pad_top + plot_h} L {first_x},{pad_top + plot_h} Z"
+
+        rolling_points = [f"{get_x(d)},{get_y(rv)}" for d, rv in zip(dates, rolling)]
+        rolling_path_data = "M " + " L ".join(rolling_points)
+
+    # Legend in header area
+    legend = f"""
+    <text x="{pad_left}" y="24" fill="{text_color}" font-family="sans-serif" font-size="12" font-weight="bold">Cumulative Mature Reviews</text>
+    <line x1="{width - pad_right - 250}" y1="20" x2="{width - pad_right - 228}" y2="20" stroke="{accent}" stroke-width="3" stroke-linecap="round" />
+    <text x="{width - pad_right - 222}" y="24" fill="{text_color}" font-family="sans-serif" font-size="11">Cumulative</text>
+    <line x1="{width - pad_right - 135}" y1="20" x2="{width - pad_right - 113}" y2="20" stroke="{secondary}" stroke-width="2.2" stroke-dasharray="4,4" stroke-linecap="round" />
+    <text x="{width - pad_right - 107}" y="24" fill="{text_color}" font-family="sans-serif" font-size="11">7d Rolling Avg</text>
+    """
 
     # Annotation for latest value (bubble tooltip style)
     latest_x = get_x(dates[-1])
     latest_y = get_y(cumulative[-1])
+    val_label = f"{int(cumulative[-1]):,}"
+    box_w = max(56.0, len(val_label) * 7.5 + 16.0)
+    box_x = min(width - pad_right - box_w, max(pad_left, latest_x - box_w - 5.0))
+    box_y = max(4.0, latest_y - 36.0)
     annotation = f"""
     <circle cx="{latest_x}" cy="{latest_y}" r="6" fill="{accent}" stroke="#ffffff" stroke-width="2" />
-    <rect x="{latest_x - 65}" y="{latest_y - 36}" width="60" height="24" rx="4" fill="{accent}" opacity="0.95" />
-    <text x="{latest_x - 35}" y="{latest_y - 20}" fill="#ffffff" font-family="sans-serif" font-size="11" font-weight="bold" text-anchor="middle">{int(cumulative[-1]):,}</text>
-    <path d="M {latest_x - 10} {latest_y - 12} L {latest_x} {latest_y} L {latest_x - 5} {latest_y - 12} Z" fill="{accent}" />
+    <rect x="{box_x}" y="{box_y}" width="{box_w}" height="24" rx="4" fill="{accent}" opacity="0.95" />
+    <text x="{box_x + box_w / 2.0}" y="{box_y + 16.0}" fill="#ffffff" font-family="sans-serif" font-size="11" font-weight="bold" text-anchor="middle">{val_label}</text>
     """
 
     # Assemble final SVG
     svg_parts = [
         f'<svg viewBox="0 0 {width} {height}" class="report-graph" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" style="background:{bg_color};">',
+        '<!-- Legend -->',
+        legend,
         '<!-- Gridlines -->',
         "\n".join(gridlines),
         '<!-- Date ticks -->',
@@ -192,16 +226,16 @@ def render_volume_graph(growth_history: list[dict], config: dict) -> Optional[st
 
     # Theme colors
     theme = config.get("graph_theme", "dark")
-    accent = config.get("graph_accent_color", "#7C6AF7")
-    secondary = config.get("graph_secondary_color", "#F7A76C")
-    
+    accent = _safe_color(config.get("graph_accent_color"), "#7C6AF7")
+    secondary = _safe_color(config.get("graph_secondary_color"), "#F7A76C")
+
     bg_color = "transparent"
     text_color = "#a0a5cc" if theme == "dark" else "#4a4b63"
     grid_color = "#2a2b4e" if theme == "dark" else "#e8e8e8"
 
     # Dimensions
     width, height = 900.0, 300.0
-    pad_left, pad_right, pad_top, pad_bottom = 70.0, 30.0, 40.0, 60.0
+    pad_left, pad_right, pad_top, pad_bottom = 70.0, 30.0, 44.0, 60.0
     plot_w = width - pad_left - pad_right
     plot_h = height - pad_top - pad_bottom
 
@@ -209,17 +243,22 @@ def render_volume_graph(growth_history: list[dict], config: dict) -> Optional[st
     min_date = dates[0]
     max_date = dates[-1]
     time_diff = (max_date - min_date).days
-    if time_diff == 0:
-        time_diff = 1
 
     max_count = max(counts)
     if max_count == 0:
         max_count = 10
 
+    num_days = max(1, time_diff + 1)
+    bar_w = min(42.0, max(2.0, (plot_w / num_days) * 0.72))
+    usable_w = max(1.0, plot_w - bar_w)
+    x_start = pad_left + bar_w / 2.0
+
     # Mapping helpers
     def get_x(d: datetime.date) -> float:
+        if time_diff <= 0:
+            return pad_left + plot_w / 2.0
         days = (d - min_date).days
-        return pad_left + (days / time_diff) * plot_w
+        return x_start + (days / time_diff) * usable_w
 
     # Horizontal gridlines
     gridlines = []
@@ -232,7 +271,7 @@ def render_volume_graph(growth_history: list[dict], config: dict) -> Optional[st
         )
         gridlines.append(
             f'<text x="{pad_left - 10}" y="{y_pos + 4}" fill="{text_color}" '
-            f'font-family="sans-serif" font-size="11" text-anchor="end">{int(y_val):,}</text>'
+            f'font-family="sans-serif" font-size="11" text-anchor="end">{int(round(y_val)):,}</text>'
         )
 
     # Date ticks (vertical grids)
@@ -250,18 +289,15 @@ def render_volume_graph(growth_history: list[dict], config: dict) -> Optional[st
 
     # Render bars
     bars = []
-    num_days = len(dates)
-    bar_w = max(2.0, (plot_w / num_days) * 0.75)  # 75% of slot width
-
     for d, count in zip(dates, counts):
         x_pos = get_x(d)
         bar_h = (count / max_count) * plot_h
         bar_y = (pad_top + plot_h) - bar_h
         bar_x = x_pos - bar_w / 2.0
-        
+
         # Color: Highlight the most recent day
         color = secondary if d == dates[-1] else accent
-        
+
         # Rounded corner dynamic cap
         rx = min(3.0, bar_h / 2.0) if bar_h > 0 else 0.0
 
@@ -270,9 +306,16 @@ def render_volume_graph(growth_history: list[dict], config: dict) -> Optional[st
             f'rx="{rx}" fill="{color}" opacity="0.9" />'
         )
 
+    header = (
+        f'<text x="{pad_left}" y="24" fill="{text_color}" '
+        f'font-family="sans-serif" font-size="12" font-weight="bold">Daily Mature Cards Reviewed</text>'
+    )
+
     # Assemble final SVG
     svg_parts = [
         f'<svg viewBox="0 0 {width} {height}" class="report-graph" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" style="background:{bg_color};">',
+        '<!-- Header -->',
+        header,
         '<!-- Gridlines -->',
         "\n".join(gridlines),
         '<!-- Date ticks -->',
@@ -312,7 +355,7 @@ def render_stability_distribution(distribution: dict[str, int], config: dict) ->
 
     palette = ["#f7786b", "#f7c26b", "#7C6AF7", "#6bcff7", "#6bf7a4"]
     theme = config.get("graph_theme", "dark")
-    
+
     bg_color = "transparent"
     text_color = "#e0e0ff" if theme == "dark" else "#1a1a2e"
 
@@ -329,18 +372,19 @@ def render_stability_distribution(distribution: dict[str, int], config: dict) ->
         if pct == 0:
             continue
         w = (pct / 100.0) * bar_w_total
-        
+        safe_label = escape(str(label))
+
         # Segment rectangle
         segments.append(
             f'<rect x="{running_x}" y="{bar_y}" width="{w}" height="{bar_h}" fill="{color}" />'
         )
-        
+
         # Text label (if space permits)
         if pct > 6.0:
             text_x = running_x + w / 2.0
             segments.append(
                 f'<text x="{text_x}" y="{bar_y + 18}" fill="#ffffff" '
-                f'font-family="sans-serif" font-size="10.5" font-weight="bold" text-anchor="middle">{label}</text>'
+                f'font-family="sans-serif" font-size="10.5" font-weight="bold" text-anchor="middle">{safe_label}</text>'
                 f'<text x="{text_x}" y="{bar_y + 31}" fill="#ffffff" '
                 f'font-family="sans-serif" font-size="10" text-anchor="middle" opacity="0.85">{pct:.1f}%</text>'
             )

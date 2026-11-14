@@ -8,7 +8,7 @@
     {% include 'styles.css' %}
   </style>
 </head>
-<body>
+<body data-theme="{{ config.get('graph_theme', 'dark') if config else 'dark' }}">
 
 <!-- ═══════════════════════════════════════════════════════════════════════ -->
 <!-- HEADER                                                                   -->
@@ -80,13 +80,49 @@
       </div>
       {% endif %}
 
+      {% if metrics.streak_days and metrics.streak_days > 0 %}
+      <div class="stat-card stat-good">
+        <div class="stat-value">{{ metrics.streak_days | int }}d</div>
+        <div class="stat-label">Study Streak</div>
+      </div>
+      {% endif %}
+
     </div><!-- /.stat-grid -->
 
     <!-- Narrative paragraphs -->
     <div class="narrative-block">
       <p>{{ insights.volume_note | safe }}</p>
+      {% if insights.speed_note %}
       <p>{{ insights.speed_note | safe }}</p>
+      {% endif %}
     </div>
+
+    {% if metrics.total_reviews and metrics.unique_cards %}
+    <div class="pill-row">
+      <div class="pill">
+        <span class="pill-key">Unique Cards</span>
+        <span class="pill-val">{{ metrics.unique_cards | int | format_number }}</span>
+      </div>
+      <div class="pill">
+        <span class="pill-key">Review</span>
+        <span class="pill-val">{{ metrics.review_reviews | default(0) | int | format_number }}</span>
+      </div>
+      <div class="pill">
+        <span class="pill-key">Learning</span>
+        <span class="pill-val">{{ metrics.learn_reviews | default(0) | int | format_number }}</span>
+      </div>
+      <div class="pill">
+        <span class="pill-key">Relearning</span>
+        <span class="pill-val">{{ metrics.relearn_reviews | default(0) | int | format_number }}</span>
+      </div>
+      {% if metrics.cram_reviews %}
+      <div class="pill">
+        <span class="pill-key">Filtered</span>
+        <span class="pill-val">{{ metrics.cram_reviews | int | format_number }}</span>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
 
   </section>
 
@@ -108,10 +144,10 @@
         {% set ret = metrics.mature_retention %}
         <svg class="retention-ring" viewBox="0 0 120 120" width="120" height="120">
           <circle cx="60" cy="60" r="50" class="ring-bg" />
-          <circle cx="60" cy="60" r="50" class="ring-fill"
+          <circle cx="60" cy="60" r="50"
+            class="ring-fill {{ 'ring-good' if ret >= 80 else 'ring-warn' if ret >= 70 else 'ring-bad' }}"
             stroke-dasharray="{{ (ret / 100 * 314.16) | round(2) }} 314.16"
-            stroke-dashoffset="78.54"
-            class="{{ 'ring-good' if ret >= 80 else 'ring-warn' if ret >= 70 else 'ring-bad' }}" />
+            stroke-dashoffset="78.54" />
           <text x="60" y="58" class="ring-label-val">{{ ret | round(1) }}%</text>
           <text x="60" y="72" class="ring-label-sub">Retention</text>
         </svg>
@@ -119,13 +155,15 @@
     </div>
 
     {% if metrics.leech_hotspots %}
+    {% set active_leech_decks = metrics.leech_hotspots | selectattr('leech_count_7d', 'gt', 0) | list %}
     <div class="leech-hotspots-container" style="margin-top: 1.75rem; padding-top: 1.5rem; border-top: 1px solid var(--border-subtle);">
       <h3 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.4rem;">
         <span style="font-size: 1.05rem;">🔥</span> Leech Hotspots by Deck
       </h3>
-      <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1rem;">
+      <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: {{ '1rem' if active_leech_decks else '0' }};">
         {{ insights.leech_note | safe }}
       </p>
+      {% if active_leech_decks %}
       <table class="comparison-table">
         <thead>
           <tr>
@@ -136,7 +174,7 @@
           </tr>
         </thead>
         <tbody>
-          {% for deck in metrics.leech_hotspots %}
+          {% for deck in active_leech_decks %}
           <tr>
             <td>{{ deck.deck_name }}</td>
             <td class="metric-val" style="text-align: right;">{{ deck.total_reviews_7d | int | format_number }}</td>
@@ -148,6 +186,7 @@
           {% endfor %}
         </tbody>
       </table>
+      {% endif %}
     </div>
     {% endif %}
 
@@ -183,8 +222,8 @@
           <td>Time Spent (min)</td>
           <td class="metric-val">{{ metrics.total_time_min | round(2) }}</td>
           <td class="metric-val muted">{{ metrics.prev_total_time_min | round(2) }}</td>
-          <td class="{{ 'positive' if metrics.total_time_min <= metrics.prev_total_time_min else 'negative' }}">
-            {{ '+' if metrics.total_time_min > metrics.prev_total_time_min else '' }}{{ (metrics.total_time_min - metrics.prev_total_time_min) | round(2) }}
+          <td class="{{ 'positive' if metrics.total_time_min >= metrics.prev_total_time_min else 'negative' }}">
+            {{ '+' if metrics.total_time_min >= metrics.prev_total_time_min else '' }}{{ (metrics.total_time_min - metrics.prev_total_time_min) | round(2) }}
           </td>
         </tr>
         <tr>
@@ -198,14 +237,28 @@
         <tr>
           <td>Mature Retention</td>
           <td class="metric-val">{{ metrics.mature_retention }}%</td>
+          {% if metrics.prev_mature_total is defined and metrics.prev_mature_total > 0 %}
+          <td class="metric-val muted">{{ metrics.prev_mature_retention | round(2) }}%</td>
+          <td class="{{ 'positive' if metrics.mature_retention >= metrics.prev_mature_retention else 'negative' }}">
+            {{ '+' if metrics.mature_retention >= metrics.prev_mature_retention else '' }}{{ (metrics.mature_retention - metrics.prev_mature_retention) | round(2) }}%
+          </td>
+          {% else %}
           <td class="metric-val muted">&mdash;</td>
           <td>&mdash;</td>
+          {% endif %}
         </tr>
         <tr>
           <td>Lapse Rate</td>
           <td class="metric-val">{{ metrics.lapse_rate }}%</td>
+          {% if metrics.prev_total_reviews and metrics.prev_lapse_rate is defined %}
+          <td class="metric-val muted">{{ metrics.prev_lapse_rate | round(2) }}%</td>
+          <td class="{{ 'positive' if metrics.lapse_rate <= metrics.prev_lapse_rate else 'negative' }}">
+            {{ '+' if metrics.lapse_rate > metrics.prev_lapse_rate else '' }}{{ (metrics.lapse_rate - metrics.prev_lapse_rate) | round(2) }}%
+          </td>
+          {% else %}
           <td class="metric-val muted">&mdash;</td>
           <td>&mdash;</td>
+          {% endif %}
         </tr>
         {% if metrics.has_fsrs %}
         <tr>
@@ -223,16 +276,19 @@
   <!-- ═══════════════════════════════════════════════════════════════════ -->
   <!-- SECTION 4 — FSRS DEEP DIVE                                          -->
   <!-- ═══════════════════════════════════════════════════════════════════ -->
-  {% if config.show_fsrs_metrics and metrics.has_fsrs %}
+  {% if config.show_fsrs_metrics %}
   <section class="section" id="section-fsrs">
     <h2 class="section-heading">
       <span class="section-icon">🧠</span> FSRS Insights
     </h2>
     <div class="narrative-block">
       <p>{{ insights.fsrs_note | safe }}</p>
+      {% if metrics.has_fsrs %}
       <p>{{ insights.etk_note | safe }}</p>
+      {% endif %}
     </div>
 
+    {% if metrics.has_fsrs %}
     {% if metrics.stability_distribution %}
       {% if graphs.stability_dist %}
       <div class="graph-wrapper">
@@ -251,6 +307,12 @@
         <span class="pill-key">Est. Total Knowledge</span>
         <span class="pill-val">{{ metrics.estimated_knowledge | int | format_number }}</span>
       </div>
+      {% if metrics.mean_retrievability is defined and metrics.mean_retrievability > 0 %}
+      <div class="pill">
+        <span class="pill-key">Mean Retrievability</span>
+        <span class="pill-val">{{ metrics.mean_retrievability }}%</span>
+      </div>
+      {% endif %}
       <div class="pill">
         <span class="pill-key">Mean Difficulty</span>
         <span class="pill-val">{{ metrics.mean_difficulty }}/10</span>
@@ -264,6 +326,18 @@
         <span class="pill-val {{ 'good' if metrics.pct_mastered > 50 else '' }}">{{ metrics.pct_mastered }}%</span>
       </div>
     </div>
+    {% else %}
+    <div class="pill-row">
+      <div class="pill">
+        <span class="pill-key">Active-deck card data blobs</span>
+        <span class="pill-val">{{ metrics.fsrs_raw_blob_count | default(0) | format_number }}</span>
+      </div>
+      <div class="pill">
+        <span class="pill-key">Parsed FSRS states</span>
+        <span class="pill-val warn">{{ metrics.fsrs_card_count | default(0) | format_number }}</span>
+      </div>
+    </div>
+    {% endif %}
   </section>
   {% endif %}
 
@@ -273,7 +347,7 @@
   {% if config.show_growth_graph %}
   <section class="section" id="section-graphs">
     <h2 class="section-heading">
-      <span class="section-icon">📈</span> Mature Card Growth
+      <span class="section-icon">📈</span> Mature Review Activity
     </h2>
 
     {% if graphs.growth %}
@@ -302,7 +376,7 @@
 
     {% if insights.llm_narrative %}
     <div class="narrative-block narrative-llm">
-      <p>{{ insights.llm_narrative | safe }}</p>
+      <p>{{ insights.llm_narrative }}</p>
     </div>
     {% endif %}
 

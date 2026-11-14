@@ -11,7 +11,7 @@ Cards with an interval ≥ this value (in days) are counted as **mature**.
 Default: `21` (matches Anki's native stats definition).
 
 ## `history_days`
-Number of days of history shown in the **Mature Card Growth Plot**.
+Number of days of history shown in the **Mature Review Activity Plot**.
 Default: `90`.
 
 ## `graph_theme`
@@ -39,6 +39,9 @@ Anki profile or this config with others if a key is set here.
 The model identifier to use. Examples:
 - OpenAI: `"gpt-4o-mini"`, `"gpt-4o"`
 - Anthropic: `"claude-3-haiku-20240307"`, `"claude-3-5-sonnet-20241022"`
+
+## `llm_temperature`
+Sampling temperature for LLM narrative generation (default: `0.7`).
 
 ## `deck_filter`
 - `"all"` — Include all decks (default)
